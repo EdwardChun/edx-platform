@@ -159,3 +159,10 @@ def get_moderator_users_list(course_id):
         for user in role.users.all()
     ]
     return moderator_user_ids
+
+
+def filter_topic_from_discussion_id(discussion_id, topics_list):
+    for topic in topics_list:
+        if topic.get("id") == discussion_id:
+            return topic
+    return {}

@@ -23,6 +23,7 @@ from rest_framework.viewsets import ViewSet
 from xmodule.modulestore.django import modulestore
 
 from common.djangoapps.util.file import store_uploaded_file
+from lms.djangoapps.course_api.blocks.api import get_blocks
 from lms.djangoapps.course_goals.models import UserActivity
 from lms.djangoapps.discussion.django_comment_client import settings as cc_settings
 from lms.djangoapps.discussion.django_comment_client.utils import get_group_id_for_comments_service
@@ -73,6 +74,7 @@ from ..rest_api.serializers import (
     DiscussionTopicSerializerV2,
     TopicOrdering,
 )
+from .utils import filter_topic_from_discussion_id
 
 log = logging.getLogger(__name__)
 
@@ -290,6 +292,86 @@ class CourseTopicsViewV2(DeveloperErrorViewMixin, APIView):
             form_query_params.cleaned_data["order_by"]
         )
         return Response(response)
+
+
+@view_auth_classes()
+class CourseTopicsViewV3(DeveloperErrorViewMixin, APIView):
+    """
+    View for listing course topics v3.
+    """
+
+    def get(self, request, course_id):
+        """
+        **Use Cases**
+
+            Retrieve the topic listing for a course.
+
+        **Example Requests**:
+
+            GET /api/discussion/v3/course_topics/course-v1:ExampleX+Subject101+2015
+        """
+        course_key = CourseKey.from_string(course_id)
+        topics = get_course_topics_v2(
+            course_key,
+            request.user,
+        )
+        course_usage_key = modulestore().make_course_usage_key(course_key)
+        blocks_params = {
+            'usage_key': course_usage_key,
+            'user': request.user,
+            'depth': None,
+            'nav_depth': None,
+            'requested_fields': {
+                'display_name',
+                'student_view_data',
+                'children',
+                'discussions_id',
+                'type',
+                'block_types_filter'
+            },
+            'block_counts': set(),
+            'student_view_data': {'discussion'},
+            'return_type': 'dict',
+            'block_types_filter': {
+                'discussion',
+                'chapter',
+                'vertical',
+                'sequential',
+                'course'
+            }
+        }
+        blocks = get_blocks(
+            request,
+            blocks_params['usage_key'],
+            blocks_params['user'],
+            blocks_params['depth'],
+            blocks_params['nav_depth'],
+            blocks_params['requested_fields'],
+            blocks_params['block_counts'],
+            blocks_params['student_view_data'],
+            blocks_params['return_type'],
+            blocks_params['block_types_filter'],
+            hide_access_denials=False,
+        )['blocks']
+
+        courseware_topics = []
+        non_courseware_topics = [
+            dict({**topic, 'courseware': False})
+            for topic in topics
+            if topic.get('usage_key', '') is None
+        ]
+        for key, value in blocks.items():
+            if value.get("type") == "chapter":
+                courseware_topics.append(value)
+                courseware_topics[-1]['courseware'] = True
+                subsections = courseware_topics[-1].get('children')
+                for index, subsection_key in enumerate(subsections):
+                    subsections[index] = blocks.get(subsection_key)
+                    for unit_index, unit_key in enumerate(subsections[index].get("children", [])):
+                        discussions_id = blocks[unit_key].get('discussions_id')
+                        unit_topic = filter_topic_from_discussion_id(discussions_id, topics)
+                        subsections[index]['children'][unit_index] = unit_topic
+        return Response(non_courseware_topics + courseware_topics)
 
 
 @view_auth_classes()
