@@ -31,7 +31,7 @@ COUNTDOWN = 60
 
 @shared_task(bind=True, ignore_result=True)
 def send_course_enrollment_email(
-    self, user_id, course_id, course_title, short_description, pacing_type
+    self, user_id, course_id, course_title, short_description, course_ended, pacing_type
 ):
     """
     Send course enrollment email using Braze API.
@@ -80,7 +80,7 @@ def send_course_enrollment_email(
 
     canvas_entry_properties.update(
         {
-            "course_date_blocks": course_date_blocks,
+            "course_date_blocks": course_date_blocks if not course_ended else [],
             "goals_enabled": ENABLE_COURSE_GOALS.is_enabled(course_key),
         }
     )
